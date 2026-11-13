@@ -123,14 +123,15 @@ window.addEventListener('pointermove', onPointerMove, true)
 window.addEventListener('pointerup', onPointerUp, true)
 window.addEventListener('pointercancel', onPointerUp, true)
 window.addEventListener('wheel', onWheel, { passive: false })
-window.addEventListener('keydown', onKeyDown)
-window.addEventListener('keyup', onKeyUp)
+window.addEventListener('keydown', onKeyDown, true)
+window.addEventListener('keyup', onKeyUp, true)
 window.addEventListener('blur', releaseSpace)
 window.addEventListener('paste', onPaste)
-window.addEventListener('dragenter', (event) => event.preventDefault())
-window.addEventListener('dragover', onDragOver)
-window.addEventListener('dragleave', scheduleHideDrop)
-window.addEventListener('drop', onDrop)
+window.addEventListener('dragenter', onDragOver, true)
+window.addEventListener('dragover', onDragOver, true)
+window.addEventListener('dragleave', scheduleHideDrop, true)
+window.addEventListener('drop', onDrop, true)
+window.addEventListener('dragend', hideDrop, true)
 window.addEventListener('auxclick', (event) => {
   if (event.button === 1) event.preventDefault()
 })
@@ -144,7 +145,7 @@ must<HTMLButtonElement>('zoom-reset').addEventListener('click', resetZoom)
 function onPointerDown(event: PointerEvent) {
   if (event.button !== 0 && event.button !== 1) return
   const target = event.target instanceof Element ? event.target : null
-  if (target?.closest('button, input, textarea, a.download')) {
+  if (target?.closest('button, input, textarea, label, a.download')) {
     const card = target.closest('.card')
     if (card instanceof HTMLElement && card.dataset.id) selectItem(card.dataset.id)
     return
@@ -187,6 +188,10 @@ function onPointerMove(event: PointerEvent) {
   pointers.set(event.pointerId, { x: event.clientX, y: event.clientY })
   if (!gesture) return
   event.preventDefault()
+  if (gesture.kind === 'draw' && spaceDown) {
+    switchDrawToPan(event.clientX, event.clientY)
+    return
+  }
   if (gesture.kind === 'pinch') {
     updatePinch(gesture)
     return
@@ -396,14 +401,16 @@ function onWheel(event: WheelEvent) {
 }
 
 function onKeyDown(event: KeyboardEvent) {
-  if (isTypingTarget(event.target) || isTypingTarget(document.activeElement)) return
-  if (event.code === 'Space') {
+  if (isSpaceKey(event)) {
+    if (isTypingTarget(event.target) || isTypingTarget(document.activeElement)) return
     if (event.target instanceof Element && event.target.closest('button, a')) return
     event.preventDefault()
     spaceDown = true
     viewport.classList.add('is-space')
+    if (gesture?.kind === 'draw') switchDrawToPan(lastClient.x, lastClient.y)
     return
   }
+  if (isTypingTarget(event.target) || isTypingTarget(document.activeElement)) return
   if (event.key === 'Delete' || event.key === 'Backspace') {
     event.preventDefault()
     removeSelected()
@@ -445,7 +452,19 @@ function onKeyDown(event: KeyboardEvent) {
 }
 
 function onKeyUp(event: KeyboardEvent) {
-  if (event.code === 'Space') releaseSpace()
+  if (isSpaceKey(event)) releaseSpace()
+}
+
+function isSpaceKey(event: KeyboardEvent): boolean {
+  return event.code === 'Space' || event.key === ' ' || event.key === 'Spacebar'
+}
+
+function switchDrawToPan(x: number, y: number) {
+  if (gesture?.kind !== 'draw') return
+  const pointerId = gesture.pointerId
+  clearLive()
+  gesture = { kind: 'pan', pointerId, lastX: x, lastY: y }
+  viewport.classList.add('is-panning')
 }
 
 function releaseSpace() {
@@ -511,7 +530,7 @@ function onDrop(event: DragEvent) {
 }
 
 async function handleTransfer(data: DataTransfer, worldPoint: Point) {
-  const files = collectFiles(data)
+  const files = await collectFiles(data)
   if (files.length > 0) {
     for (let index = 0; index < files.length; index++) {
       await placeFile(files[index], originFor(worldPoint, index))
@@ -528,7 +547,10 @@ async function handleTransfer(data: DataTransfer, worldPoint: Point) {
     const html = data.getData('text/html')
     if (html) text = htmlToText(html)
   }
-  if (!text.trim()) return
+  if (!text.trim()) {
+    showStatus('Nothing in that paste or drop could be placed.')
+    return
+  }
   if (isHttpUrl(text)) placeLink(text.trim(), originFor(worldPoint, 0))
   else placeText(text, originFor(worldPoint, 0))
 }
@@ -618,9 +640,6 @@ function mountItem(item: BoardItem) {
   content.className = 'card-content'
   content.append(renderContent(item))
 
-  const fields = document.createElement('div')
-  fields.className = 'card-fields'
-
   const title = document.createElement('input')
   title.className = 'title'
   title.type = 'text'
@@ -630,6 +649,7 @@ function mountItem(item: BoardItem) {
   title.autocomplete = 'off'
   title.spellcheck = false
   title.maxLength = MAX_TITLE_CHARS
+  title.addEventListener('click', () => title.select())
   title.addEventListener('input', () => {
     item.title = title.value
     article.setAttribute('aria-label', item.title || kindLabel(item.kind))
@@ -661,8 +681,7 @@ function mountItem(item: BoardItem) {
     removeItem(item.id)
   })
 
-  fields.append(title, description)
-  article.append(content, fields, remove)
+  article.append(labeledField('Title', title), content, labeledField('Description', description), remove)
   itemsRoot.append(article)
   itemElements.set(item.id, article)
   fitDescription(description)
@@ -753,6 +772,8 @@ function note(message: string): HTMLParagraphElement {
   return paragraph
 }
 
+let stackOrder = 1
+
 function selectItem(id: string) {
   selectedItemId = id
   selectedStrokeId = null
@@ -760,10 +781,20 @@ function selectItem(id: string) {
   if (index >= 0 && index < items.length - 1) {
     const [item] = items.splice(index, 1)
     items.push(item)
-    const element = itemElements.get(id)
-    if (element) itemsRoot.append(element)
   }
+  const element = itemElements.get(id)
+  if (element) element.style.zIndex = String(++stackOrder)
   syncSelection()
+}
+
+function labeledField(caption: string, control: HTMLElement): HTMLLabelElement {
+  const label = document.createElement('label')
+  label.className = 'field'
+  const span = document.createElement('span')
+  span.className = 'field-caption'
+  span.textContent = caption
+  label.append(span, control)
+  return label
 }
 
 function selectStroke(id: string) {
@@ -934,7 +965,7 @@ function fitDescription(textarea: HTMLTextAreaElement) {
   textarea.style.overflowY = textarea.scrollHeight > 180 ? 'auto' : 'hidden'
 }
 
-function collectFiles(data: DataTransfer): File[] {
+async function collectFiles(data: DataTransfer): Promise<File[]> {
   const files: File[] = []
   const seen = new Set<string>()
   const push = (file: File | null) => {
@@ -945,12 +976,33 @@ function collectFiles(data: DataTransfer): File[] {
     files.push(file)
   }
   for (const file of Array.from(data.files)) push(file)
+  const entries: FileSystemEntry[] = []
   if (data.items) {
     for (const item of Array.from(data.items)) {
-      if (item.kind === 'file') push(item.getAsFile())
+      if (item.kind !== 'file') continue
+      const file = item.getAsFile()
+      if (file) {
+        push(file)
+        continue
+      }
+      const entry = item.webkitGetAsEntry?.()
+      if (entry) entries.push(entry)
     }
   }
+  for (const entry of entries) {
+    push(await fileFromEntry(entry))
+  }
   return files
+}
+
+function fileFromEntry(entry: FileSystemEntry): Promise<File | null> {
+  if (!entry.isFile) return Promise.resolve(null)
+  return new Promise((resolve) => {
+    ;(entry as FileSystemFileEntry).file(
+      (file) => resolve(file),
+      () => resolve(null),
+    )
+  })
 }
 
 function ensureType(file: File): File {
