@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Swipe Space</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f6f6a'/%3E%3Cpath d='M8 21c4-9 6-9 8-2s4 7 8-6' fill='none' stroke='%23fffdf9' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="viewport">
+      <div id="world">
+        <svg id="ink" xmlns="http://www.w3.org/2000/svg" overflow="visible"></svg>
+        <div id="items"></div>
+      </div>
+      <div id="empty">
+        <h1>Draw, paste, or drop</h1>
+        <p>Images, files, text, and links land on this canvas. Each one keeps a title and a description.</p>
+      </div>
+    </div>
+    <div class="top">
+      <div class="brand"><span class="mark" aria-hidden="true"></span> Swipe Space</div>
+    </div>
+    <div class="dock">
+      <p class="hint">Drag to draw. Scroll or Space+drag to pan. Ctrl+scroll to zoom. Paste or drop to place.</p>
+      <div class="zoom" role="group" aria-label="Zoom">
+        <button type="button" id="zoom-out" aria-label="Zoom out" title="Zoom out (-)">−</button>
+        <button type="button" id="zoom-reset" aria-label="Reset zoom" title="Reset zoom (0)">
+          <span id="zoom-label">100%</span>
+        </button>
+        <button type="button" id="zoom-in" aria-label="Zoom in" title="Zoom in (+)">+</button>
+      </div>
+    </div>
+    <div id="drop-banner" hidden>Drop to place on the canvas</div>
+    <div id="status" role="status"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
